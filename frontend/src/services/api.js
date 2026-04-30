@@ -1,4 +1,5 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 const TOKEN_KEY = 'jt_task_manager_token';
 const USER_KEY = 'jt_task_manager_user';
 
@@ -24,7 +25,7 @@ export function clearSession() {
 async function request(path, options = {}) {
   const token = getToken();
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${API_BASE_URL}/api${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -34,17 +35,47 @@ async function request(path, options = {}) {
   });
 
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.message || 'Request failed.');
+
+  if (!response.ok) {
+    throw new Error(data.message || 'Request failed.');
+  }
+
   return data;
 }
 
 export const api = {
-  register: (payload) => request('/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
-  login: (payload) => request('/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
+  register: (payload) =>
+    request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  login: (payload) =>
+    request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
   me: () => request('/auth/me'),
+
   getTasks: () => request('/tasks'),
+
   getTask: (id) => request(`/tasks/${id}`),
-  createTask: (payload) => request('/tasks', { method: 'POST', body: JSON.stringify(payload) }),
-  updateTask: (id, payload) => request(`/tasks/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
-  deleteTask: (id) => request(`/tasks/${id}`, { method: 'DELETE' })
+
+  createTask: (payload) =>
+    request('/tasks', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  updateTask: (id, payload) =>
+    request(`/tasks/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+
+  deleteTask: (id) =>
+    request(`/tasks/${id}`, {
+      method: 'DELETE'
+    })
 };
