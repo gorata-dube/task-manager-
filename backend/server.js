@@ -17,7 +17,10 @@ const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+      return callback(null, true);
+    }
+
     return callback(new Error('Not allowed by CORS. Add this frontend URL to FRONTEND_URL.'));
   },
   credentials: true
@@ -26,11 +29,19 @@ app.use(cors({
 app.use(express.json());
 
 function createToken(user) {
-  return jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign(
+    { id: user.id, email: user.email },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
 }
 
 function cleanUser(user) {
-  return { id: user.id, name: user.name, email: user.email };
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email
+  };
 }
 
 function cleanTask(task) {
@@ -43,30 +54,60 @@ function cleanTask(task) {
 async function authRequired(req, res, next) {
   try {
     const authHeader = req.headers.authorization || '';
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    const token = authHeader.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : '';
 
-    if (!token) return res.status(401).json({ message: 'Please login first.' });
+    if (!token) {
+      return res.status(401).json({
+        message: 'Please login first.'
+      });
+    }
 
     const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await get('SELECT id, name, email FROM users WHERE id = ?', [decoded.id]);
 
-    if (!user) return res.status(401).json({ message: 'Account not found.' });
+    const user = await get(
+      'SELECT id, name, email FROM users WHERE id = ?',
+      [decoded.id]
+    );
+
+    if (!user) {
+      return res.status(401).json({
+        message: 'Account not found.'
+      });
+    }
 
     req.user = user;
     next();
+
   } catch (err) {
-    return res.status(401).json({ message: 'Invalid or expired login. Please login again.' });
+    return res.status(401).json({
+      message: 'Invalid or expired login. Please login again.'
+    });
   }
 }
 
 app.get('/', (req, res) => {
-  res.json({ message: 'Nova Task Manager API is running.' });
+  res.json({
+    message: 'Nova Task Manager API is running.'
+  });
+});
+
+app.get('/api', (req, res) => {
+  res.json({
+    message: 'API working successfully',
+    database: 'SQLite'
+  });
 });
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', database: 'sqlite' });
+  res.json({
+    status: 'ok',
+    database: 'sqlite'
+  });
 });
 
+// REGISTER
 app.post('/api/auth/register', async (req, res, next) => {
   try {
     const name = String(req.body.name || '').trim();
@@ -74,83 +115,148 @@ app.post('/api/auth/register', async (req, res, next) => {
     const password = String(req.body.password || '');
 
     if (!name || !email || !password) {
-      return res.status(400).json({ message: 'Name, email and password are required.' });
+      return res.status(400).json({
+        message: 'Name, email and password are required.'
+      });
     }
 
     if (!email.includes('@')) {
-      return res.status(400).json({ message: 'Please enter a valid email address.' });
+      return res.status(400).json({
+        message: 'Please enter a valid email address.'
+      });
     }
 
     if (password.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters.' });
+      return res.status(400).json({
+        message: 'Password must be at least 6 characters.'
+      });
     }
 
-    const existingUser = await get('SELECT id FROM users WHERE email = ?', [email]);
-    if (existingUser) return res.status(409).json({ message: 'Email already registered. Please login.' });
+    const existingUser = await get(
+      'SELECT id FROM users WHERE email = ?',
+      [email]
+    );
+
+    if (existingUser) {
+      return res.status(409).json({
+        message: 'Email already registered. Please login.'
+      });
+    }
 
     const passwordHash = await bcrypt.hash(password, 10);
+
     const result = await run(
       'INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)',
       [name, email, passwordHash]
     );
 
-    const user = await get('SELECT id, name, email FROM users WHERE id = ?', [result.lastID]);
+    const user = await get(
+      'SELECT id, name, email FROM users WHERE id = ?',
+      [result.lastID]
+    );
+
     const token = createToken(user);
 
-    res.status(201).json({ user: cleanUser(user), token });
+    res.status(201).json({
+      user: cleanUser(user),
+      token
+    });
+
   } catch (err) {
     next(err);
   }
 });
 
+// LOGIN
 app.post('/api/auth/login', async (req, res, next) => {
   try {
     const email = String(req.body.email || '').trim().toLowerCase();
     const password = String(req.body.password || '');
 
     if (!email || !password) {
-      return res.status(400).json({ message: 'Email and password are required.' });
+      return res.status(400).json({
+        message: 'Email and password are required.'
+      });
     }
 
-    const user = await get('SELECT * FROM users WHERE email = ?', [email]);
-    if (!user) return res.status(401).json({ message: 'Invalid email or password.' });
+    const user = await get(
+      'SELECT * FROM users WHERE email = ?',
+      [email]
+    );
 
-    const correctPassword = await bcrypt.compare(password, user.password_hash);
-    if (!correctPassword) return res.status(401).json({ message: 'Invalid email or password.' });
+    if (!user) {
+      return res.status(401).json({
+        message: 'Invalid email or password.'
+      });
+    }
+
+    const correctPassword = await bcrypt.compare(
+      password,
+      user.password_hash
+    );
+
+    if (!correctPassword) {
+      return res.status(401).json({
+        message: 'Invalid email or password.'
+      });
+    }
 
     const token = createToken(user);
-    res.json({ user: cleanUser(user), token });
+
+    res.json({
+      user: cleanUser(user),
+      token
+    });
+
   } catch (err) {
     next(err);
   }
 });
 
+// CURRENT USER
 app.get('/api/auth/me', authRequired, (req, res) => {
-  res.json({ user: cleanUser(req.user) });
+  res.json({
+    user: cleanUser(req.user)
+  });
 });
 
+// GET TASKS
 app.get('/api/tasks', authRequired, async (req, res, next) => {
   try {
     const tasks = await all(
       'SELECT * FROM tasks WHERE user_id = ? ORDER BY completed ASC, id DESC',
       [req.user.id]
     );
+
     res.json(tasks.map(cleanTask));
+
   } catch (err) {
     next(err);
   }
 });
 
+// GET SINGLE TASK
 app.get('/api/tasks/:id', authRequired, async (req, res, next) => {
   try {
-    const task = await get('SELECT * FROM tasks WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
-    if (!task) return res.status(404).json({ message: 'Task not found.' });
+    const task = await get(
+      'SELECT * FROM tasks WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+
+    if (!task) {
+      return res.status(404).json({
+        message: 'Task not found.'
+      });
+    }
+
     res.json(cleanTask(task));
+
   } catch (err) {
     next(err);
   }
 });
 
+// CREATE TASK
 app.post('/api/tasks', authRequired, async (req, res, next) => {
   try {
     const title = String(req.body.title || '').trim();
@@ -158,67 +264,155 @@ app.post('/api/tasks', authRequired, async (req, res, next) => {
     const dueDate = String(req.body.due_date || '').trim();
     const priority = String(req.body.priority || 'Normal').trim();
 
-    if (!title) return res.status(400).json({ message: 'Task title is required.' });
+    if (!title) {
+      return res.status(400).json({
+        message: 'Task title is required.'
+      });
+    }
 
     const result = await run(
-      'INSERT INTO tasks (user_id, title, description, due_date, priority, completed) VALUES (?, ?, ?, ?, ?, ?)',
+      `INSERT INTO tasks
+      (user_id, title, description, due_date, priority, completed)
+      VALUES (?, ?, ?, ?, ?, ?)`,
       [req.user.id, title, description, dueDate, priority, 0]
     );
 
-    const task = await get('SELECT * FROM tasks WHERE id = ? AND user_id = ?', [result.lastID, req.user.id]);
+    const task = await get(
+      'SELECT * FROM tasks WHERE id = ? AND user_id = ?',
+      [result.lastID, req.user.id]
+    );
+
     res.status(201).json(cleanTask(task));
+
   } catch (err) {
     next(err);
   }
 });
 
+// UPDATE TASK
 app.put('/api/tasks/:id', authRequired, async (req, res, next) => {
   try {
-    const existingTask = await get('SELECT * FROM tasks WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
-    if (!existingTask) return res.status(404).json({ message: 'Task not found.' });
+    const existingTask = await get(
+      'SELECT * FROM tasks WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
 
-    const title = req.body.title !== undefined ? String(req.body.title).trim() : existingTask.title;
-    const description = req.body.description !== undefined ? String(req.body.description).trim() : existingTask.description;
-    const dueDate = req.body.due_date !== undefined ? String(req.body.due_date).trim() : existingTask.due_date;
-    const priority = req.body.priority !== undefined ? String(req.body.priority).trim() : existingTask.priority;
-    const completed = req.body.completed !== undefined ? (req.body.completed ? 1 : 0) : existingTask.completed;
+    if (!existingTask) {
+      return res.status(404).json({
+        message: 'Task not found.'
+      });
+    }
 
-    if (!title) return res.status(400).json({ message: 'Task title is required.' });
+    const title =
+      req.body.title !== undefined
+        ? String(req.body.title).trim()
+        : existingTask.title;
+
+    const description =
+      req.body.description !== undefined
+        ? String(req.body.description).trim()
+        : existingTask.description;
+
+    const dueDate =
+      req.body.due_date !== undefined
+        ? String(req.body.due_date).trim()
+        : existingTask.due_date;
+
+    const priority =
+      req.body.priority !== undefined
+        ? String(req.body.priority).trim()
+        : existingTask.priority;
+
+    const completed =
+      req.body.completed !== undefined
+        ? (req.body.completed ? 1 : 0)
+        : existingTask.completed;
 
     await run(
       `UPDATE tasks
-       SET title = ?, description = ?, due_date = ?, priority = ?, completed = ?, updated_at = CURRENT_TIMESTAMP
+       SET title = ?,
+           description = ?,
+           due_date = ?,
+           priority = ?,
+           completed = ?,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND user_id = ?`,
-      [title, description, dueDate, priority, completed, req.params.id, req.user.id]
+      [
+        title,
+        description,
+        dueDate,
+        priority,
+        completed,
+        req.params.id,
+        req.user.id
+      ]
     );
 
-    const updatedTask = await get('SELECT * FROM tasks WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    const updatedTask = await get(
+      'SELECT * FROM tasks WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+
     res.json(cleanTask(updatedTask));
+
   } catch (err) {
     next(err);
   }
 });
 
+// DELETE TASK
 app.delete('/api/tasks/:id', authRequired, async (req, res, next) => {
   try {
-    const result = await run('DELETE FROM tasks WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
-    if (result.changes === 0) return res.status(404).json({ message: 'Task not found.' });
-    res.json({ message: 'Task deleted successfully.' });
+    const result = await run(
+      'DELETE FROM tasks WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+
+    if (result.changes === 0) {
+      return res.status(404).json({
+        message: 'Task not found.'
+      });
+    }
+
+    res.json({
+      message: 'Task deleted successfully.'
+    });
+
   } catch (err) {
     next(err);
   }
 });
 
-app.use((req, res) => res.status(404).json({ message: 'Route not found.' }));
-
-app.use((err, req, res, next) => {
-  console.error(err);
-  if (err.message && err.message.includes('CORS')) return res.status(403).json({ message: err.message });
-  res.status(500).json({ message: 'Server error. Please try again.' });
+// 404
+app.use((req, res) => {
+  res.status(404).json({
+    message: 'Route not found.'
+  });
 });
 
+// ERROR HANDLER
+app.use((err, req, res, next) => {
+  console.error(err);
+
+  if (err.message && err.message.includes('CORS')) {
+    return res.status(403).json({
+      message: err.message
+    });
+  }
+
+  res.status(500).json({
+    message: 'Server error. Please try again.'
+  });
+});
+
+// START SERVER + DATABASE
 initDatabase()
-  .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)))
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+      console.log('SQLite database connected and tables ready');
+    });
+  })
   .catch((err) => {
     console.error('Database startup failed:', err.message);
     process.exit(1);
